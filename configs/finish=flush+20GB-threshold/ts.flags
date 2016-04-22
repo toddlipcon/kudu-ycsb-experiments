@@ -1,0 +1,2 @@
+-cfile_do_on_finish=flush
+-flush_threshold_mb=20000
