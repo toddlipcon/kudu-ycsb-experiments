@@ -17,7 +17,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import glob
+import copy
 import logging
 import os
 import shutil
@@ -25,62 +25,48 @@ import subprocess
 import sys
 import time
 import urllib2
+import yaml
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-CONFIGS_DIR = os.path.join(BASE_DIR, "configs")
+
+SETUP_YAML_PATH = os.path.join(BASE_DIR, "setup.yaml")
 
 YCSB_EXPORTER_FLAGS= ["-p", "exporter=com.yahoo.ycsb.measurements.exporter.JSONArrayMeasurementsExporter"]
 YCSB_DIR = os.path.join(BASE_DIR, "..")
 YCSB = os.path.join(YCSB_DIR, "bin", "ycsb")
 
-DATA_DIRS = glob.glob("/data/*/todd")
-
-RECORD_COUNT = 100 * 1000 * 1000
-OPERATION_COUNT = RECORD_COUNT
-MAX_EXECUTION_TIME = 60 * 30 # 30m
-DEFAULT_THREADS = 16
-
-LOAD_SYNC_OPS = bool(int(os.environ.get("LOAD_SYNC_OPS", "1")))
-
 class Experiment:
-  def __init__(self, exp_id, config_name):
-    self.exp_id = exp_id
-    self.config_name = config_name
-
-  @property
-  def exp_config_dir(self):
-    return os.path.join(CONFIGS_DIR, self.config_name)
-
-  @property
-  def base_config_dir(self):
-    return os.path.join(BASE_DIR, "base-configs")
+  def __init__(self, dimensions, config):
+    self.dimensions = dimensions
+    self.config = config
 
   @property
   def results_dir(self):
-    return os.path.join(BASE_DIR, "results", self.exp_id, self.config_name)
+    path = os.path.join(BASE_DIR, "results")
+    for dim_name, dim_val in sorted(self.dimensions.iteritems()):
+      path = os.path.join(path, "%s=%s" % (dim_name, dim_val))
+    return path
     
   @property
   def log_dir(self):
     return os.path.join(self.results_dir, "logs")
 
+  def flags(self, config_key):
+    return ["--%s=%s" % kvpair for kvpair in self.config[config_key].iteritems()]
+
 def start_servers(exp):
   if not os.path.exists(exp.log_dir):
     os.makedirs(exp.log_dir)
-  logging.info("Starting servers for config dir %s" % exp.exp_config_dir) 
-  ts_proc = subprocess.Popen(["kudu-tserver",
-      "--flagfile", os.path.join(exp.base_config_dir, "ts.flags"),
-      "--flagfile", os.path.join(exp.exp_config_dir, "ts.flags"),
+  logging.info("Starting servers...")
+  ts_proc = subprocess.Popen(["kudu-tserver"] + exp.flags("ts_flags") + [
       "--log_dir", exp.log_dir],
       stderr=subprocess.STDOUT,
       stdout=file(os.path.join(exp.log_dir, "ts.stderr"), "w"))
-  master_proc = subprocess.Popen(["kudu-master",
-      "--flagfile", os.path.join(exp.base_config_dir, "master.flags"),
-      "--flagfile", os.path.join(exp.exp_config_dir, "master.flags"),
+  master_proc = subprocess.Popen(["kudu-master"] + exp.flags("master_flags") + [
       "--log_dir", exp.log_dir],
       stderr=subprocess.STDOUT,
       stdout=file(os.path.join(exp.log_dir, "master.stderr"), "w"))
   return (master_proc, ts_proc)
-
 
 def stop_servers():
   subprocess.call(["pkill", "kudu-tserver"])
@@ -89,32 +75,30 @@ def stop_servers():
 
 def remove_data():
   for d in DATA_DIRS:
-    rmr(os.path.join(d, "ts"))
-    rmr(os.path.join(d, "master"))
-
+    rmr(d)
 
 def rmr(dir):
     if os.path.exists(dir):
-      logging.info("Removing ts and master data from %s" % dir)
+      logging.info("Removing data from %s" % dir)
       shutil.rmtree(dir)
 
 
-def run_ycsb(exp, phase, workload, threads=DEFAULT_THREADS, sync_ops=True):
-  logging.info("Running YCSB %s-%s for config %s" % (phase, workload, exp.config_name))
+def run_ycsb(exp, phase, workload, sync_ops=0):
+  logging.info("Running YCSB %s-%s for config %s" % (phase, workload, exp.dimensions))
   results_json = os.path.join(exp.results_dir, "ycsb-%s-%s.json" % (phase, workload))
+  ycsb_opts = exp.config['ycsb_opts']
   argv = [YCSB, phase, "kudu",
        "-P", os.path.join(YCSB_DIR, "workloads", workload),
        "-p", "kudu_table_num_replicas=1",
-       "-p", "recordcount=%d" % RECORD_COUNT,
-       "-p", "operationcount=%d" % OPERATION_COUNT,
+       "-p", "recordcount=%d" % ycsb_opts['recordcount'],
+       "-p", "operationcount=%d" % ycsb_opts['operationcount'],
+       "-p", "kudu_sync_ops=%s" % str(sync_ops),
        "-s",
-       "-threads", str(threads)] + \
+       "-threads", str(ycsb_opts['threads'])] + \
        YCSB_EXPORTER_FLAGS + \
        ["-p", "exportfile=%s" % results_json]
   if phase != "load":
-    argv += ["-p", "maxexecutiontime=%s" % MAX_EXECUTION_TIME]
-  if sync_ops:
-    argv += ["-p", "kudu_sync_ops=true"]
+    argv += ["-p", "maxexecutiontime=%s" % ycsb_opts['max_execution_time']]
 
   subprocess.check_call(argv,
        stdout=file(os.path.join(exp.results_dir, "ycsb-%s-%s.log" % (phase, workload)), "w"),
@@ -130,27 +114,58 @@ def dump_ts_info(exp, suffix):
     shutil.copyfileobj(urllib2.urlopen("http://localhost:8050/" + page), dst)
 
 def run_experiment(exp):
-  logging.info("Running experiment %s" % exp.config_name)
+  logging.info("Running experiment %s" % exp.dimensions)
   stop_servers()
   remove_data()
   start_servers(exp)
-  run_ycsb(exp, "load", "workloada", sync_ops=LOAD_SYNC_OPS)
+  run_ycsb(exp, "load", "workloada",
+      sync_ops=int(exp.config['ycsb_opts']['load_sync']))
   dump_ts_info(exp, "after-load")
-  run_ycsb(exp, "run", "workloadc")
-  dump_ts_info(exp, "after-c")
-  run_ycsb(exp, "run", "workloada")
-  dump_ts_info(exp, "final")
+#  run_ycsb(exp, "run", "workloadc")
+#  dump_ts_info(exp, "after-c")
+#  run_ycsb(exp, "run", "workloada")
+#  dump_ts_info(exp, "final")
   stop_servers()
+  remove_data()
 
-def run_all_configs():
-  exp_id = os.environ.get("EXPERIMENT_ID", time.strftime("%Y%m%d-%H%M%S"))
-  for config_name in os.listdir(CONFIGS_DIR):
-    exp = Experiment(exp_id, config_name)
+def generate_dimension_combinations(setup_yaml):
+  combos = [{}]
+  for dim_name, dim_values in setup_yaml['dimensions'].iteritems():
+    new_combos = []
+    for c in combos:
+      for dim_val in dim_values:
+        new_combo = c.copy()
+        new_combo[dim_name] = dim_val
+        new_combos.append(new_combo)
+    combos = new_combos
+  return combos
+
+def load_experiments(setup_yaml):
+  combos = generate_dimension_combinations(setup_yaml)
+  exps = []
+  for c in combos:
+    # 'c' is a dictionary like {"dim1": "dim_val1", "dim2": "dim_val2"}.
+    # We need to convert it into the actual set of options and flags.
+    setup = copy.deepcopy(setup_yaml['base_flags'])
+    setup['dimensions'] = c
+    for dim_name, dim_val in c.iteritems():
+      # Look up the options for the given dimension value.
+      # e.g.: {"ts_flags": {"foo", "bar"}}
+      dim_val_dict = setup_yaml['dimensions'][dim_name][dim_val]
+      for k, v in dim_val_dict.iteritems():
+        setup[k].update(v)
+    exps.append(Experiment(c, setup)) 
+  return exps
+
+
+def run_all(exps):
+  for exp in exps:
     run_experiment(exp)
 
 if __name__ == "__main__":
   logging.basicConfig(level=logging.INFO)
-  if len(DATA_DIRS) == 0:
-    raise Exception("Should set DATA_DIRS to point to where ts and master data will go")
-    
-  run_all_configs()
+  setup_yaml = yaml.load(file(SETUP_YAML_PATH))
+  global DATA_DIRS
+  DATA_DIRS = setup_yaml['all_data_dirs']
+  exps = load_experiments(setup_yaml)
+  run_all(exps)

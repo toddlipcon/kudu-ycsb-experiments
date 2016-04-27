@@ -1,0 +1,71 @@
+# The total set of data directories that are used by the experiment.
+#
+# NOTE: these directories will be fully deleted before each test run!
+all_data_dirs:
+  - "/data/1/todd/master"
+  - "/data/1/todd/ts"
+  - "/data/2/todd/ts"
+  - "/data/3/todd/ts"
+  - "/data/4/todd/ts"
+  - "/data/5/todd/ts"
+  - "/data/6/todd/ts"
+  - "/data/7/todd/ts"
+  - "/data/8/todd/ts"
+  - "/data/9/todd/ts"
+  - "/data/10/todd/ts"
+  - "/data/11/todd/ts"
+  - "/data/12/todd/ts"
+
+# The base flags that individual experiments can override or extend.
+base_flags:
+  ycsb_opts:
+    recordcount:    1000000
+    operationcount: 1000000
+    threads:        16
+    max_execution_time: 1800
+  ts_flags:
+    fs_wal_dir: "/data/1/todd/ts"
+    metrics_log_interval_ms: "10000"
+  master_flags:
+    fs_wal_dir: "/data/1/todd/master"
+    fs_data_dirs: "/data/1/todd/master"
+    default_num_replicas: 1
+
+# The dimensions to test along. Every combination of dimensions will be
+# tested.
+dimensions:
+  # Test both synchronous and buffered LOAD phase.
+  sync:
+    "true": { ycsb_opts: { load_sync: true } }
+    "false": { ycsb_opts: { load_sync: false } }
+  # Test with the WAL collocated with a data directory vs separate.
+  wal:
+    shared:
+      ts_flags:
+        fs_data_dirs: "/data/1/todd/ts,/data/10/todd/ts,/data/11/todd/ts,/data/12/todd/ts,/data/2/todd/ts,/data/3/todd/ts,/data/4/todd/ts,/data/5/todd/ts,/data/6/todd/ts,/data/7/todd/ts,/data/8/todd/ts,/data/9/todd/ts"
+    separate:
+      ts_flags:
+        fs_data_dirs: "/data/10/todd/ts,/data/11/todd/ts,/data/12/todd/ts,/data/2/todd/ts,/data/3/todd/ts,/data/4/todd/ts,/data/5/todd/ts,/data/6/todd/ts,/data/7/todd/ts,/data/8/todd/ts,/data/9/todd/ts"
+  # Test with different values for the number of maintenance managers
+  mm_threads:
+    1: { ts_flags: { maintenance_manager_num_threads: "1" } }
+    2: { ts_flags: { maintenance_manager_num_threads: "2" } }
+    4: { ts_flags: { maintenance_manager_num_threads: "4" } }
+  # Test different behaviors for flushing.
+  flush_config:
+    default: {}
+    flush:
+      ts_flags:
+        cfile_do_on_finish: "flush"
+    flush_1gb_threshold:
+      ts_flags:
+        cfile_do_on_finish: "flush"
+        flush_threshold_mb: "1000"
+    flush_10gb_threshold:
+      ts_flags:
+        cfile_do_on_finish: "flush"
+        flush_threshold_mb: "10000"
+    flush_20gb_threshold:
+      ts_flags:
+        cfile_do_on_finish: "flush"
+        flush_threshold_mb: "20000"

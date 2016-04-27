@@ -1,3 +1,0 @@
--fs_wal_dir=/data/1/todd/ts
--fs_data_dirs=/data/1/todd/ts,/data/10/todd/ts,/data/11/todd/ts,/data/12/todd/ts,/data/2/todd/ts,/data/3/todd/ts,/data/4/todd/ts,/data/5/todd/ts,/data/6/todd/ts,/data/7/todd/ts,/data/8/todd/ts,/data/9/todd/ts
--metrics_log_interval_ms=10000
