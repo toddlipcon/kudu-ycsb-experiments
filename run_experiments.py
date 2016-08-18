@@ -114,6 +114,8 @@ def dump_ts_info(exp, suffix):
     shutil.copyfileobj(urllib2.urlopen("http://localhost:8050/" + page), dst)
 
 def run_experiment(exp):
+  if os.path.exists(exp.results_dir):
+    logging.info("Skipping experiment %s (results dir already exists)" % exp.dimensions)
   logging.info("Running experiment %s" % exp.dimensions)
   stop_servers()
   remove_data()
