@@ -18,14 +18,43 @@ all_data_dirs:
 
 # The base flags that individual experiments can override or extend.
 base_flags:
+  # Path to find kudu-tserver and kudu-master.
+  # If empty, these binaries should be on your $PATH
+  kudu_sbin_dir: ""
+  
+  # Path to find the 'ycsb' binary.
+  ycsb_bin: "../YCSB/bin/ycsb"
+
+  # Path to find YCSB workloads
+  ycsb_workloads_dir: "../YCSB/workloads"
+
+  # YCSB workloads to run for each experiment.
+  # The default is to load data, then run a read-only
+  # workload, then run a read-write workload.
+  ycsb_workloads:
+    - { phase: "load", workload: "workloada" }
+    - { phase: "run", workload: "workloadc" }
+    - { phase: "run", workload: "workloada" }
+
+  # Base options for YCSB.
   ycsb_opts:
-    recordcount:    1000000
-    operationcount: 1000000
+    # The number of client threads to run.
     threads:        16
+    # The number of records to load during the 'load' phase.
+    recordcount:    1000000
+    # The operation count and amount of time (in seconds) 
+    # that 'run' phases are permitted to run for.
+    # The operation count default is set high so that the max-time
+    # setting should take precedence.
+    operationcount: 1000000000
     max_execution_time: 1800
+
+  # Base options for the tablet server.
   ts_flags:
     fs_wal_dir: "/data/1/todd/ts"
     metrics_log_interval_ms: "10000"
+
+  # Base options for the master.
   master_flags:
     fs_wal_dir: "/data/1/todd/master"
     fs_data_dirs: "/data/1/todd/master"
@@ -42,10 +71,33 @@ dimensions:
   wal:
     shared:
       ts_flags:
-        fs_data_dirs: "/data/1/todd/ts,/data/10/todd/ts,/data/11/todd/ts,/data/12/todd/ts,/data/2/todd/ts,/data/3/todd/ts,/data/4/todd/ts,/data/5/todd/ts,/data/6/todd/ts,/data/7/todd/ts,/data/8/todd/ts,/data/9/todd/ts"
+        fs_data_dirs:
+          - /data/1/todd/ts
+          - /data/2/todd/ts
+          - /data/3/todd/ts
+          - /data/4/todd/ts
+          - /data/5/todd/ts
+          - /data/6/todd/ts
+          - /data/7/todd/ts
+          - /data/8/todd/ts
+          - /data/9/todd/ts
+          - /data/10/todd/ts
+          - /data/11/todd/ts
+          - /data/12/todd/ts
     separate:
       ts_flags:
-        fs_data_dirs: "/data/10/todd/ts,/data/11/todd/ts,/data/12/todd/ts,/data/2/todd/ts,/data/3/todd/ts,/data/4/todd/ts,/data/5/todd/ts,/data/6/todd/ts,/data/7/todd/ts,/data/8/todd/ts,/data/9/todd/ts"
+        fs_data_dirs:
+          - /data/2/todd/ts
+          - /data/3/todd/ts
+          - /data/4/todd/ts
+          - /data/5/todd/ts
+          - /data/6/todd/ts
+          - /data/7/todd/ts
+          - /data/8/todd/ts
+          - /data/9/todd/ts
+          - /data/10/todd/ts
+          - /data/11/todd/ts
+          - /data/12/todd/ts
   # Test with different values for the number of maintenance managers
   mm_threads:
     1: { ts_flags: { maintenance_manager_num_threads: "1" } }

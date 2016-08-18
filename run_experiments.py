@@ -32,13 +32,13 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 SETUP_YAML_PATH = os.path.join(BASE_DIR, "setup.yaml")
 
 YCSB_EXPORTER_FLAGS= ["-p", "exporter=com.yahoo.ycsb.measurements.exporter.JSONArrayMeasurementsExporter"]
-YCSB_DIR = os.path.join(BASE_DIR, "..")
-YCSB = os.path.join(YCSB_DIR, "bin", "ycsb")
 
 class Experiment:
   def __init__(self, dimensions, config):
     self.dimensions = dimensions
     self.config = config
+    self.ycsb_bin = os.path.abspath(self.config['ycsb_bin'])
+    self.workload_dir = os.path.abspath(self.config['ycsb_workloads_dir'])
 
   @property
   def results_dir(self):
@@ -52,20 +52,43 @@ class Experiment:
     return os.path.join(self.results_dir, "logs")
 
   def flags(self, config_key):
-    return ["--%s=%s" % kvpair for kvpair in self.config[config_key].iteritems()]
+    ret = []
+    for flag, value in self.config[config_key].iteritems():
+      if type(value) == list:
+        value = ",".join(value)
+      ret.append("--%s=%s" % (flag, value))
+    return ret
+
+  def workload_path(self, workload):
+    return os.path.join(self.workload_dir, workload)
 
 def start_servers(exp):
+  logging.info("Starting servers...")
+
+  ts_bin = os.path.join(exp.config['kudu_sbin_dir'], "kudu-tserver")
+  master_bin = os.path.join(exp.config['kudu_sbin_dir'], "kudu-master")
   if not os.path.exists(exp.log_dir):
     os.makedirs(exp.log_dir)
-  logging.info("Starting servers...")
-  ts_proc = subprocess.Popen(["kudu-tserver"] + exp.flags("ts_flags") + [
-      "--log_dir", exp.log_dir],
-      stderr=subprocess.STDOUT,
-      stdout=file(os.path.join(exp.log_dir, "ts.stderr"), "w"))
-  master_proc = subprocess.Popen(["kudu-master"] + exp.flags("master_flags") + [
-      "--log_dir", exp.log_dir],
-      stderr=subprocess.STDOUT,
-      stdout=file(os.path.join(exp.log_dir, "master.stderr"), "w"))
+  try:
+    ts_proc = subprocess.Popen(
+        [ts_bin] +
+        exp.flags("ts_flags") +
+        ["--log_dir", exp.log_dir],
+        stderr=subprocess.STDOUT,
+        stdout=file(os.path.join(exp.log_dir, "ts.stderr"), "w"))
+    master_proc = subprocess.Popen(
+        [master_bin] +
+        exp.flags("master_flags") +
+        [ "--log_dir", exp.log_dir],
+        stderr=subprocess.STDOUT,
+        stdout=file(os.path.join(exp.log_dir, "master.stderr"), "w"))
+  except OSError, e:
+    logging.fatal("Failed to start kudu servers: %s", e)
+    if '/' not in ts_bin:
+      logging.fatal("Make sure they are on your $PATH, or configure kudu_sbin_dir")
+    else:
+      logging.fatal("Tried path: %s", ts_bin)
+    sys.exit(1)
   return (master_proc, ts_proc)
 
 def stop_servers():
@@ -83,16 +106,20 @@ def rmr(dir):
       shutil.rmtree(dir)
 
 
-def run_ycsb(exp, phase, workload, sync_ops=0):
+def run_ycsb(exp, phase, workload):
+  sync_ops = False
+  if phase == 'load':
+    sync_ops = exp.config['ycsb_opts']['load_sync']
+
   logging.info("Running YCSB %s-%s for config %s" % (phase, workload, exp.dimensions))
   results_json = os.path.join(exp.results_dir, "ycsb-%s-%s.json" % (phase, workload))
   ycsb_opts = exp.config['ycsb_opts']
-  argv = [YCSB, phase, "kudu",
-       "-P", os.path.join(YCSB_DIR, "workloads", workload),
+  argv = [exp.ycsb_bin, phase, "kudu",
+       "-P", exp.workload_path(workload),
        "-p", "kudu_table_num_replicas=1",
        "-p", "recordcount=%d" % ycsb_opts['recordcount'],
        "-p", "operationcount=%d" % ycsb_opts['operationcount'],
-       "-p", "kudu_sync_ops=%s" % str(sync_ops),
+       "-p", "kudu_sync_ops=%s" % str(int(sync_ops)),
        "-s",
        "-threads", str(ycsb_opts['threads'])] + \
        YCSB_EXPORTER_FLAGS + \
@@ -100,10 +127,15 @@ def run_ycsb(exp, phase, workload, sync_ops=0):
   if phase != "load":
     argv += ["-p", "maxexecutiontime=%s" % ycsb_opts['max_execution_time']]
 
-  subprocess.check_call(argv,
-       stdout=file(os.path.join(exp.results_dir, "ycsb-%s-%s.log" % (phase, workload)), "w"),
-       stderr=subprocess.STDOUT,
-       cwd=YCSB_DIR)
+  stdout_log = os.path.join(exp.results_dir, "ycsb-%s-%s.log" % (phase, workload))
+  try:
+    subprocess.check_call(argv,
+         stdout=file(stdout_log, "w"),
+         stderr=subprocess.STDOUT,
+         cwd=os.path.join(os.path.dirname(exp.ycsb_bin), ".."))
+  except subprocess.CalledProcessError, e:
+    logging.fatal("ycsb failed. Check log in %s", stdout_log)
+    sys.exit(1)
 
 def dump_ts_info(exp, suffix):
   for page, fname in [("rpcz", "rpcz"),
@@ -120,13 +152,10 @@ def run_experiment(exp):
   stop_servers()
   remove_data()
   start_servers(exp)
-  run_ycsb(exp, "load", "workloada",
-      sync_ops=int(exp.config['ycsb_opts']['load_sync']))
-  dump_ts_info(exp, "after-load")
-#  run_ycsb(exp, "run", "workloadc")
-#  dump_ts_info(exp, "after-c")
-#  run_ycsb(exp, "run", "workloada")
-#  dump_ts_info(exp, "final")
+  for yaml_entry in exp.config['ycsb_workloads']:
+    phase, workload = yaml_entry['phase'], yaml_entry['workload']
+    run_ycsb(exp, phase, workload)
+    dump_ts_info(exp, "after-%s-%s" % (phase, workload))
   stop_servers()
   remove_data()
 
