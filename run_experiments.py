@@ -17,6 +17,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import argparse
 import copy
 import logging
 import os
@@ -29,7 +30,6 @@ import yaml
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-SETUP_YAML_PATH = os.path.join(BASE_DIR, "setup.yaml")
 
 YCSB_EXPORTER_FLAGS= ["-p", "exporter=com.yahoo.ycsb.measurements.exporter.JSONArrayMeasurementsExporter"]
 
@@ -193,10 +193,21 @@ def run_all(exps):
   for exp in exps:
     run_experiment(exp)
 
-if __name__ == "__main__":
-  logging.basicConfig(level=logging.INFO)
-  setup_yaml = yaml.load(file(SETUP_YAML_PATH))
+
+def main():
+  p = argparse.ArgumentParser("Run a set of YCSB experiments")
+  p.add_argument("--setup-yaml",
+      dest="setup_yaml_path",
+      type=str,
+      help="YAML file describing experiments to run",
+      default=os.path.join(BASE_DIR, "setup.yaml"))
+  args = p.parse_args()
+  setup_yaml = yaml.load(file(args.setup_yaml_path))
   global DATA_DIRS
   DATA_DIRS = setup_yaml['all_data_dirs']
   exps = load_experiments(setup_yaml)
   run_all(exps)
+
+if __name__ == "__main__":
+  logging.basicConfig(level=logging.INFO)
+  main()
