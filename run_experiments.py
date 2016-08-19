@@ -145,7 +145,12 @@ def dump_ts_info(exp, suffix):
                ("mem-trackers?raw", "mem-trackers")]:
     fname = "%s-%s.txt" % (fname, suffix)
     dst = file(os.path.join(exp.results_dir, fname), "w")
-    shutil.copyfileobj(urllib2.urlopen("http://localhost:8050/" + page), dst)
+    try:
+      shutil.copyfileobj(urllib2.urlopen("http://localhost:8050/" + page), dst)
+    except:
+      logging.fatal("Failed to fetch tablet server info. TS may have crashed.")
+      logging.fatal("Check for FATAL log files in %s", exp.log_dir)
+      sys.exit(1)
 
 def run_experiment(exp):
   if os.path.exists(exp.results_dir):
