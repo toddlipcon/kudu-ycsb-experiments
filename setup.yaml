@@ -40,14 +40,19 @@ base_flags:
   ycsb_opts:
     # The number of client threads to run.
     threads:        16
+
     # The number of records to load during the 'load' phase.
     recordcount:    1000000
+
     # The operation count and amount of time (in seconds) 
     # that 'run' phases are permitted to run for.
     # The operation count default is set high so that the max-time
     # setting should take precedence.
     operationcount: 1000000000
     max_execution_time: 1800
+
+    # The length of each of the fields written to YCSB
+    fieldlength: 10
 
   # Base options for the tablet server.
   ts_flags:

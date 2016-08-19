@@ -119,6 +119,7 @@ def run_ycsb(exp, phase, workload):
        "-p", "kudu_table_num_replicas=1",
        "-p", "recordcount=%d" % ycsb_opts['recordcount'],
        "-p", "operationcount=%d" % ycsb_opts['operationcount'],
+       "-p", "fieldlength=%d" % ycsb_opts.get('fieldlength', 100),
        "-p", "kudu_sync_ops=%s" % str(int(sync_ops)),
        "-s",
        "-threads", str(ycsb_opts['threads'])] + \
