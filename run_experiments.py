@@ -151,6 +151,9 @@ def run_experiment(exp):
   logging.info("Running experiment %s" % exp.dimensions)
   stop_servers()
   remove_data()
+  # Sync file system so that there isn't any dirty data left over from prior runs
+  # sitting in buffer caches.
+  subprocess.check_call(["sync"])
   start_servers(exp)
   for yaml_entry in exp.config['ycsb_workloads']:
     phase, workload = yaml_entry['phase'], yaml_entry['workload']
