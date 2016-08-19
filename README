@@ -1,0 +1,140 @@
+This repository contains a harness for benchmarking Apache Kudu using YCSB.
+
+Describing a set of benchmarks in YAML
+--------------------------------------
+A benchmark run consists of a set of experiments. This set is generated based
+on a YAML file. The repository contains an example YAML file called 'setup.yaml'.
+The YAML file contains a few top-level elements:
+
+- "all_data_dirs"
+
+This configuration lists a set of directories that will be used for data
+by the experiments. Before each experiment is run, these directories are
+"rm -Rf"ed. Therefore, it's important _not_ to specify something like
+"/home/todd" but rather "/home/todd/kudu-experiment-data/" or more likely
+a list of data directories on separate drives, as shown in the example.
+
+- "base_flags"
+
+This is the top-level configuration for the experiments. It configures
+basic properties such as where to find the Kudu binaries, where to find YCSB,
+which YCSB workloads to run, and common configurations that each experiment
+will share.
+
+- "dimensions"
+
+This sets up the matrix of configurations to generate experiments. An
+experiment is run for every combination of dimension values. Each dimension
+is named by an arbitrary key (eg "sync" or "wal"). The user specifies
+a set of arbitrary values for each dimension, each corresponding to a
+dictionary of configuration overrides.
+
+In the provided example, we want to test the effects of whether YCSB is
+configured to load data synchronously or asynchronously. So, the first
+dimension is called "sync", and has values "true" and "false". The
+test setups for these values override the "ycsb_opts.load_sync" property.
+
+The second example dimension is called "wal", and is used to compare the
+performance of putting the WAL directory on the same drive as one of the
+data directories vs a separate one. In the "shared" configuration, the
+ts_flags "fs_data_dirs" property is overridden to list all directories
+/data/1 through /data/12. In the "separate" configuration, the directory
+on /data/1 is omitted.
+
+Note that since all combinations of configurations are tested, the effect
+of adding dimensions is multiplicative. In the example file, we have the
+following dimensions:
+
+- "sync": 2 configurations
+- "wal": 2 configurations
+- "mm_threads": 3 configurations
+- "flush_config": 5 configurations
+
+The result is that this YAML file specifies 2*2*3*5 = 60 separate benchmark
+experiments.
+
+Another example YAML file is provided as 'cache.yaml'.
+
+Prerequisites:
+-------------------
+
+- download or build a copy of Apache Kudu. The 'kudu-tserver' and 'kudu-master'
+  binaries should be located in some directory /path/to/kudu/bin/
+
+  NOTE: if building from source, be sure to do a RELEASE build. See the Kudu README
+  for instructions.
+
+- check out YCSB from the 'kudu' branch of git@github.com:toddlipcon/YCSB.git .
+  This is up-to-date with the latest Kudu client and API usage, and is also
+  edited to only build the Kudu bindings.
+
+  - Run 'mvn clean package' to build YCSB.
+  - This will generate kudu/target/ycsb-kudu-binding-0.11.0-SNAPSHOT.tar.gz
+  - Untar that somewhere (eg /home/todd/) to produce /home/todd/ycsb-kudu-binding-0.11.0-SNAPSHOT/
+
+
+Required edits in setup.yaml
+---------------------------
+The provided setup.yaml file needs to be edited based on your machine:
+
+- change the YCSB paths to point to the ycsb-kudu-binding-0.11.0-SNAPSHOT/bin/ycsb binary
+  and .../workloads/ directory
+
+- change the Kudu bin/ directory configuration
+
+- change 'all_data_dirs' to point to the set of data directories you'll use in
+  your experiments.  Remember that these will be rm -rfed in between
+  experiments, so use something like /data/1/ycsb-exp-data/ rather than
+  /data/1/.
+
+- make equivalent changes to the Kudu configuration flags to point to the
+  desired data directories
+
+
+Running benchmarks
+--------------------
+Use the following command to start benchmarks:
+
+  run_experiments.py --setup-yaml=setup.yaml
+
+Depending on your setup, this may take many hours or even days, given the
+multiplicative effect of dimensions under test. Given that, it's likely
+you will want to run this command under 'screen' or 'tmux' so that
+you may leave your session and resume later.
+
+When you are first trying this tool, you may want to remove several of the
+dimensions under test and/or reduce the record and operation counts to
+very small values to reduce the test runtime. However, if you are running
+real benchmarks, long run-times are important to see how the system behaves
+after large amounts of data have accumulated.
+
+
+Inspecting results
+---------------------
+The benchmark script will create a 'results/' directory. The directory tree
+will have one level of depth for each dimension. This results in paths like:
+
+  - results/sync=true/cache_sizes=512/
+  - results/sync=true/cache_sizes=1000/
+  - results/sync=true/cache_sizes=5000/
+  - ...
+
+corresponding to each experiment that was run. Instead each directory you can
+find:
+  - logs/ - the Kudu glogs and metrics log
+  - ycsb-<phase>-<workload>.log - YCSB logs for each workload/phase configured
+  - ycsb-<phase>-<workload>.json - YCSB results JSON for each workload/phase
+  - rpcz-after-<phase>-<workload> - RPC summary information
+  - metrics-after-<phase>-<workload> - metrics dumps
+  - mem-trackers-after-<phase>-<workload> - memory dumps
+
+The metrics logs are particularly useful as they present a time series of the
+Tablet Server metrics over each experiment. A 'kudu_metrics_log.py' script
+is provided that can be used as a template to extract interesting metrics
+in TSV format from the log, for easier graphing in other tools. Other utility
+python code is also included for easier graphing. See this blog post for
+an example Jupyter notebook that extracts variousg raphs from a series
+of experiments:
+
+  http://kudu.apache.org/2016/04/26/ycsb.html
+
