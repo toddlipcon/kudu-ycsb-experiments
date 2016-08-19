@@ -99,6 +99,7 @@ def stop_servers():
 def remove_data():
   for d in DATA_DIRS:
     rmr(d)
+    os.makedirs(d)
 
 def rmr(dir):
     if os.path.exists(dir):
