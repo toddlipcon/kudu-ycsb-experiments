@@ -89,6 +89,18 @@ def start_servers(exp):
     else:
       logging.fatal("Tried path: %s", ts_bin)
     sys.exit(1)
+  # Wait for servers to start.
+  for x in xrange(60):
+    try:
+      logging.info("Waiting for servers to come up...")
+      urllib2.urlopen("http://localhost:8050/").read()
+      urllib2.urlopen("http://localhost:8051/").read()
+      break
+    except:
+      if x == 59:
+        raise
+      time.sleep(1)
+      pass
   return (master_proc, ts_proc)
 
 def stop_servers():
@@ -121,7 +133,7 @@ def run_ycsb(exp, phase, workload):
        "-p", "recordcount=%d" % ycsb_opts['recordcount'],
        "-p", "operationcount=%d" % ycsb_opts['operationcount'],
        "-p", "fieldlength=%d" % ycsb_opts.get('fieldlength', 100),
-       "-p", "kudu_sync_ops=%s" % str(int(sync_ops)),
+       "-p", "kudu_sync_ops=%s" % (sync_ops and "true" or "false"),
        "-s",
        "-threads", str(ycsb_opts['threads'])] + \
        YCSB_EXPORTER_FLAGS + \
@@ -155,6 +167,7 @@ def dump_ts_info(exp, suffix):
 def run_experiment(exp):
   if os.path.exists(exp.results_dir):
     logging.info("Skipping experiment %s (results dir already exists)" % exp.dimensions)
+    return
   logging.info("Running experiment %s" % exp.dimensions)
   stop_servers()
   remove_data()
